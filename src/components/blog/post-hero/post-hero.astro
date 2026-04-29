@@ -47,6 +47,7 @@ const imageSrc = images[image]?.default || image;
         alt={image_alt}
         widths={[600, 800, 1200]}
         sizes="(max-width: 1200px) 100vw, 1200px"
+        inferSize={true}
         loading="eager"
         formats={["avif", "webp"]}
       />
