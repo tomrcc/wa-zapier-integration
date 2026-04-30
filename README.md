@@ -1,68 +1,50 @@
-# Astro Minimal Starter
+# Writer Access → Site pipeline
 
-A minimal starter template for building an Astro site with [CloudCannon](https://cloudcannon.com/) using **Editable Regions** for visual editing.
+This repo auto-publishes posts written in [Writer Access](https://www.writeraccess.com/) to the blog. End-to-end:
 
-See a [demo site](https://tiny-jackal.cloudvent.net/).
-
-## Features
-
-- Visual editing with [Editable Regions](https://cloudcannon.com/documentation/developer-guides/set-up-visual-editing/an-overview-of-editable-regions/) (text, image, array, source, and component regions)
-- Page building with reusable components
-- Blog with pagination and tags
-- [Tailwind CSS v4](https://tailwindcss.com/) with CSS-first configuration
-- SEO controls
-- Pagefind search
-
-## Getting Started
-
-Click `Use this template` to make your own copy of the repository.
-
-### Local Development
-
-1. Clone the repository to your local machine.
-
-2. Start the development server.
-
-```bash
-npm install
-npm run dev
+```
+Writer Access  ──►  Zapier  ──►  this repo (writer-access/*.json)
+                                          │
+                                          ▼
+                                  GitHub Actions runs
+                                  writer-access/formatter.mjs
+                                          │
+                                          ▼
+                                  src/content/blog/<slug>.mdx
+                                  (committed back to main)
 ```
 
-## CloudCannon Setup
+### 1. Editor exports a post in Writer Access
 
-This site is pre-configured for CloudCannon. Connect your repository and CloudCannon will detect the configuration in `.cloudcannon/initial-site-settings.json` and build your site automatically. The editing experience is defined in `cloudcannon.config.yml`, which you can modify to control your editors' experience.
+On an approved order in WA, the editor opens **Export Content → Zapier**. WA fires a webhook to Zapier with the order payload (`title`, `body`, etc.).
 
-### Editable Regions
+### 2. Zapier zap
 
-This starter demonstrates several types of Editable Region:
+The zap has three steps:
 
-- **Text** (`data-editable="text"`) for editing front matter text values inline
-- **Image** (`data-editable="image"`) for editing front matter image values
-- **Array** (`data-editable="array"`) for page-building with reorderable content blocks
-- **Source** (`data-editable="source"`) for making standalone `.astro` pages editable
-- **Component** (`<editable-component>`) for live re-rendering of Astro components
+1. **Webhooks by Zapier — Catch Hook**: receives the WA payload.
+2. **GitHub — Create or Update File**: writes the payload as a JSON file into `writer-access/` on `main` (filename = order title `.json`). This commit is what kicks off step 3.
+3. **Email by Zapier — Send Outbound Email**: notifies the dev/editor that a new post has arrived, so they know to check the resulting MDX.
 
-Components that need live re-rendering are registered in `src/scripts/register-components.ts` and loaded conditionally when the site is open in CloudCannon's Visual Editor.
+### 3. GitHub Actions formats the post
 
-#### Source Editables
+The workflow at `.github/workflows/format-writer-access.yml` triggers on any push that touches `writer-access/**`. It:
 
-The About page (`src/content/pages/about.astro`) demonstrates **source editables** — a pattern where content lives directly in an Astro template rather than in Markdown front matter. Source editable regions use `data-editable="source"`, `data-path="path/to/file.astro"`, and `data-key` attributes. CloudCannon writes changes straight back to the `.astro` file.
+1. Installs deps and runs `node writer-access/formatter.mjs`.
+2. The script (see `writer-access/formatter.mjs`) for each `*.json` in `writer-access/`:
+   - Sanitizes the JSON — WA's `body` field contains raw HTML with unescaped `"`, newlines, and tabs that break `JSON.parse`. `sanitizeWriterAccessJson` rewrites just the body's value range to make it parseable.
+   - Builds an MDX file via `jsonToMdx` — `body` becomes the MDX body (HTML pasted inline; MDX accepts that), and the rest of the keys become YAML frontmatter. Schema-required fields the WA payload doesn't provide (`post_hero.*`, `thumb_image_path`, `thumb_image_alt`) are stubbed with empty/placeholder values so the post passes the content-collection schema in `src/content.config.ts`. An editor fills these in afterwards in CloudCannon.
+   - Slugifies the filename and writes to `src/content/blog/<slug>.mdx`.
+   - Empties the `writer-access/` directory (except `formatter.mjs`) so the next run starts clean.
+3. Commits the generated `.mdx` and the cleanup deletions back to `main` as the `github-actions[bot]` user.
 
-This is useful for standalone pages (like About or Contact) where a developer wants full control over the markup while still giving editors visual editing access — **and where page building with components is *not* desired**. No accompanying Markdown file or front matter schema is needed. A thin routing wrapper in `src/pages/about.astro` handles Astro's file-based routing.
+The workflow's commit uses the auto-provided `GITHUB_TOKEN` with `contents: write` permission. Pushes from `GITHUB_TOKEN` deliberately do not trigger other workflow runs, so there's no infinite loop — but be aware that any deploy/CI workflow you add later won't auto-fire on the bot's commit unless you switch to a PAT or GitHub App token.
 
-### Components
+### What to do when it doesn't work
 
-Three page-building components are included:
-
-- **Hero** — heading, subheading, image, and optional button
-- **LeftRight** — side-by-side text and image, with optional flip and button
-- **TextBlock** — heading and rich text content
-
-### Content
-
-- **Pages** are in `src/content/pages/` as Markdown with structured front matter, and support a component-based page-building workflow. Developers can also add standalone pages paired with a routing file in `src/pages/` (like `src/content/pages/about.astro`), and decide which parts of those pages are editable in CloudCannon.
-- **Blog posts** are in `src/content/blog/` as MDX files
-- **Data** files (site settings, navigation) are in `data/`
+- **Post didn't appear**: check the Actions tab for a failed `Format Writer Access posts` run. Schema validation failures will name the missing frontmatter field.
+- **JSON.parse error in the workflow logs**: WA sent a payload with a structure `sanitizeWriterAccessJson` doesn't expect (e.g. `body` is no longer the last field, or a non-string field also has illegal characters). The sanitizer is deliberately scoped to just the `body` value — adjust it if the payload shape changes.
+- **Zap didn't fire**: check the Zap History in Zapier. WA-side issues mean the editor didn't pick **Export Content → Zapier**, or the Catch Hook URL in WA's integration settings is stale.
 
 ## Project Structure
 
