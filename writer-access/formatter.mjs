@@ -9,17 +9,18 @@ import yaml from "js-yaml";
   const waPosts = waDirFiles.filter((fileName) => fileName != "formatter.mjs");
   const postsDirPath = "src/content/blog";
 
-  for (let index = 0; index < waPosts.length; index++) {
-    const post = waPosts[index];
-    const postPath = path.join(waDirPath, post);
-    const postDataRaw = await fs.promises.readFile(postPath, "utf-8");
-    const postData = JSON.parse(sanitizeWriterAccessJson(postDataRaw));
+  await Promise.all(
+    waPosts.map(async (post) => {
+      const postPath = path.join(waDirPath, post);
+      const postDataRaw = await fs.promises.readFile(postPath, "utf-8");
+      const postData = JSON.parse(sanitizeWriterAccessJson(postDataRaw));
 
-    const postName = slugify(post.replace(".json", ""), { lower: true });
-    const pathToWrite = path.join(postsDirPath, `${postName}.mdx`);
-    const postContents = jsonToMdx(postData);
-    await fs.promises.writeFile(pathToWrite, postContents);
-  }
+      const postName = slugify(post.replace(".json", ""), { lower: true });
+      const pathToWrite = path.join(postsDirPath, `${postName}.mdx`);
+      const postContents = jsonToMdx(postData);
+      await fs.promises.writeFile(pathToWrite, postContents);
+    }),
+  );
 
   // Clean up directory after we've written posts
   await cleanupWriterAccessDir(waDirPath);
@@ -33,8 +34,25 @@ async function cleanupWriterAccessDir(waDirPath) {
   }
 }
 
+// Rewrites applied to the post body to swap WA's HTML for what CloudCannon expects.
+// Add a new [pattern, replacement] entry here whenever a fresh quirk turns up.
+const cloudCannonRewrites = [
+  [/style='text-align:\s*justify;?\s*'/g, "class='align-justify'"],
+  [/style='text-align:\s*center;?\s*'/g, "class='align-center'"],
+  [/style='text-align:\s*left;?\s*'/g, "class='align-left'"],
+  [/style='text-align:\s*right;?\s*'/g, "class='align-right'"],
+];
+
+function applyCloudCannonRewrites(body) {
+  return cloudCannonRewrites.reduce(
+    (acc, [pattern, replacement]) => acc.replace(pattern, replacement),
+    body,
+  );
+}
+
 function jsonToMdx(postData) {
   const { title = "", body = "", ...rest } = postData;
+  const rewrittenBody = applyCloudCannonRewrites(body);
 
   const frontmatter = {
     _schema: "default",
@@ -53,7 +71,7 @@ function jsonToMdx(postData) {
   };
 
   const yamlStr = yaml.dump(frontmatter, { lineWidth: -1 });
-  return `---\n${yamlStr}---\n${body}\n`;
+  return `---\n${yamlStr}---\n${rewrittenBody}\n`;
 }
 
 function sanitizeWriterAccessJson(raw) {
