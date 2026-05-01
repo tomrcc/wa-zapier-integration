@@ -50,6 +50,7 @@ function applyCloudCannonRewrites(body) {
   );
 }
 
+// Turn WA post from the raw data JSON into a proper mdx blog post
 function jsonToMdx(postData) {
   const { title = "", body = "", ...rest } = postData;
   const rewrittenBody = applyCloudCannonRewrites(body);
@@ -74,6 +75,7 @@ function jsonToMdx(postData) {
   return `---\n${yamlStr}---\n${rewrittenBody}\n`;
 }
 
+// Sometimes body content contains illegal JSON chars
 function sanitizeWriterAccessJson(raw) {
   const startMatch = raw.match(/"body"\s*:\s*"/);
   if (!startMatch) return raw;
