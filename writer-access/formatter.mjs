@@ -37,7 +37,7 @@ async function cleanupWriterAccessDir(waDirPath) {
 // Rewrites applied to the post body to swap WA's HTML for what CloudCannon expects.
 // Add a new [pattern, replacement] entry here whenever a fresh quirk turns up.
 const cloudCannonRewrites = [
-  [/style='text-align:\s*justify;?\s*'/g, ""],
+  [/ style='text-align:\s*justify;?\s*'/g, ""],
   [/style='text-align:\s*center;?\s*'/g, "class='align-center'"],
   [/style='text-align:\s*left;?\s*'/g, "class='align-left'"],
   [/style='text-align:\s*right;?\s*'/g, "class='align-right'"],
