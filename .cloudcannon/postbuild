@@ -1,2 +1,1 @@
 npx -y pagefind --site dist
-node writer-access/formatter.mjs
