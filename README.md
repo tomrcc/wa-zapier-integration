@@ -3,15 +3,16 @@
 This repo auto-publishes posts written in [Writer Access](https://www.writeraccess.com/) to the blog. End-to-end:
 
 ```
-Writer Access  ──►  Zapier  ──►  this repo (writer-access/*.json)
+Writer Access  ──►  Zapier  ──►  this repo (writer-access/*.json on main)
                                           │
                                           ▼
-                                  GitHub Actions runs
-                                  writer-access/formatter.mjs
+                                  CloudCannon build is triggered
+                                  prebuild runs writer-access/formatter.mjs
                                           │
                                           ▼
                                   src/content/blog/<slug>.mdx
-                                  (committed back to main)
+                                  (generated in the build container,
+                                   then Astro builds the site as normal)
 ```
 
 ### 1. Editor exports a post in Writer Access
@@ -23,27 +24,31 @@ On an approved order in WA, the editor opens **Export Content → Zapier**. WA f
 The zap has three steps:
 
 1. **Webhooks by Zapier — Catch Hook**: receives the WA payload.
-2. **GitHub — Create or Update File**: writes the payload as a JSON file into `writer-access/` on `main` (filename = order title `.json`). This commit is what kicks off step 3.
-3. **Email by Zapier — Send Outbound Email**: notifies the dev/editor that a new post has arrived, so they know to check the resulting MDX.
+2. **GitHub — Create or Update File**: writes the payload as a JSON file into `writer-access/` on `main` (filename = order title `.json`). The push to `main` is what kicks off the CloudCannon build in step 3.
+3. **Email by Zapier — Send Outbound Email**: notifies the dev/editor that a new post has arrived, so they know to check the live site.
 
-### 3. GitHub Actions formats the post
+### 3. CloudCannon prebuild formats the post
 
-The workflow at `.github/workflows/format-writer-access.yml` triggers on any push that touches `writer-access/**`. It:
+CloudCannon runs `.cloudcannon/prebuild` before each site build. That script is a one-liner:
 
-1. Installs deps and runs `node writer-access/formatter.mjs`.
-2. The script (see `writer-access/formatter.mjs`) for each `*.json` in `writer-access/`:
-   - Sanitizes the JSON — WA's `body` field contains raw HTML with unescaped `"`, newlines, and tabs that break `JSON.parse`. `sanitizeWriterAccessJson` rewrites just the body's value range to make it parseable.
-   - Builds an MDX file via `jsonToMdx` — `body` becomes the MDX body (HTML pasted inline; MDX accepts that), and the rest of the keys become YAML frontmatter. Schema-required fields the WA payload doesn't provide (`post_hero.*`, `thumb_image_path`, `thumb_image_alt`) are stubbed with empty/placeholder values so the post passes the content-collection schema in `src/content.config.ts`. An editor fills these in afterwards in CloudCannon.
-   - Slugifies the filename and writes to `src/content/blog/<slug>.mdx`.
-   - Empties the `writer-access/` directory (except `formatter.mjs`) so the next run starts clean.
-3. Commits the generated `.mdx` and the cleanup deletions back to `main` as the `github-actions[bot]` user.
+```bash
+node writer-access/formatter.mjs
+```
 
-The workflow's commit uses the auto-provided `GITHUB_TOKEN` with `contents: write` permission. Pushes from `GITHUB_TOKEN` deliberately do not trigger other workflow runs, so there's no infinite loop — but be aware that any deploy/CI workflow you add later won't auto-fire on the bot's commit unless you switch to a PAT or GitHub App token.
+For each `*.json` in `writer-access/`, the script (see `writer-access/formatter.mjs`):
+
+- **Sanitizes the JSON** — WA's `body` field contains raw HTML with unescaped `"`, newlines, and tabs that break `JSON.parse`. `sanitizeWriterAccessJson` rewrites just the body's value range to make it parseable.
+- **Rewrites HTML for CloudCannon** — `applyCloudCannonRewrites` runs a list of `[pattern, replacement]` rules against the body, e.g. swapping `style='text-align:justify'` for `class='align-justify'` (CC's expected form). Add new entries to `cloudCannonRewrites` whenever a fresh quirk turns up.
+- **Builds an MDX file via `jsonToMdx`** — `body` becomes the MDX body (HTML pasted inline; MDX accepts that), and the rest of the keys become YAML frontmatter. Schema-required fields the WA payload doesn't provide (`post_hero.*`, `thumb_image_path`, `thumb_image_alt`) are stubbed with empty/placeholder values so the post passes the content-collection schema in `src/content.config.ts`. An editor can fill those in afterwards in CloudCannon.
+- **Slugifies the filename** and writes to `src/content/blog/<slug>.mdx`.
+
+After the prebuild finishes, Astro builds the site with the freshly generated MDX bundled in. Nothing is committed back to the repo — the generated `.mdx` only exists inside the build container. The source of truth for each post is its `*.json` file in `writer-access/` on `main`.
 
 ### What to do when it doesn't work
 
-- **Post didn't appear**: check the Actions tab for a failed `Format Writer Access posts` run. Schema validation failures will name the missing frontmatter field.
-- **JSON.parse error in the workflow logs**: WA sent a payload with a structure `sanitizeWriterAccessJson` doesn't expect (e.g. `body` is no longer the last field, or a non-string field also has illegal characters). The sanitizer is deliberately scoped to just the `body` value — adjust it if the payload shape changes.
+- **Post didn't appear on the live site**: check the build log in CloudCannon for the run that should have included the new post. Schema validation failures will name the missing frontmatter field; rewrite errors and `JSON.parse` errors surface in the prebuild step's stdout.
+- **`JSON.parse` error in the prebuild logs**: WA sent a payload with a structure `sanitizeWriterAccessJson` doesn't expect (e.g. `body` is no longer the last field, or a non-string field also has illegal characters). The sanitizer is deliberately scoped to just the `body` value — adjust it if the payload shape changes.
+- **HTML renders but looks wrong (e.g. alignment classes missing)**: WA emitted a style/markup form not yet covered by `cloudCannonRewrites`. Add a new entry to that array.
 - **Zap didn't fire**: check the Zap History in Zapier. WA-side issues mean the editor didn't pick **Export Content → Zapier**, or the Catch Hook URL in WA's integration settings is stale.
 
 ## Project Structure
