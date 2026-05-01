@@ -10,9 +10,13 @@ Writer Access  ──►  Zapier  ──►  this repo (writer-access/*.json on 
                                   prebuild runs writer-access/formatter.mjs
                                           │
                                           ▼
-                                  src/content/blog/<slug>.mdx
-                                  (generated in the build container,
-                                   then Astro builds the site as normal)
+                                  src/content/blog/<slug>.mdx generated,
+                                  writer-access/*.json deleted,
+                                  both synced back to main via
+                                  CLOUDCANNON_SYNC_PATHS
+                                          │
+                                          ▼
+                                  Astro builds the site as normal
 ```
 
 ### 1. Editor exports a post in Writer Access
@@ -41,8 +45,11 @@ For each `*.json` in `writer-access/`, the script (see `writer-access/formatter.
 - **Rewrites HTML for CloudCannon** — `applyCloudCannonRewrites` runs a list of `[pattern, replacement]` rules against the body, e.g. swapping `style='text-align:justify'` for `class='align-justify'` (CC's expected form). Add new entries to `cloudCannonRewrites` whenever a fresh quirk turns up.
 - **Builds an MDX file via `jsonToMdx`** — `body` becomes the MDX body (HTML pasted inline; MDX accepts that), and the rest of the keys become YAML frontmatter. Schema-required fields the WA payload doesn't provide (`post_hero.*`, `thumb_image_path`, `thumb_image_alt`) are stubbed with empty/placeholder values so the post passes the content-collection schema in `src/content.config.ts`. An editor can fill those in afterwards in CloudCannon.
 - **Slugifies the filename** and writes to `src/content/blog/<slug>.mdx`.
+- **Empties the `writer-access/` directory** (everything except `formatter.mjs`) so the same JSON isn't re-processed on the next build.
 
-After the prebuild finishes, Astro builds the site with the freshly generated MDX bundled in. Nothing is committed back to the repo — the generated `.mdx` only exists inside the build container. The source of truth for each post is its `*.json` file in `writer-access/` on `main`.
+After the prebuild finishes, both changes — the new `.mdx` files under `src/content/blog/` and the deletion of the consumed `writer-access/*.json` files — are synced from the build container back to `main` via CloudCannon's `CLOUDCANNON_SYNC_PATHS` environment variable (configured in CloudCannon's site settings). Astro then builds the site with the freshly generated MDX bundled in.
+
+So the source of truth for each post is the generated `src/content/blog/<slug>.mdx` in the repo. The `*.json` in `writer-access/` is a transient drop-off — it lives only between Zapier's commit and the next CloudCannon build that consumes and deletes it. Editors making changes to a post afterwards edit the `.mdx` directly in CloudCannon.
 
 ### What to do when it doesn't work
 
